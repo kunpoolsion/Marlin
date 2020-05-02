@@ -27,7 +27,7 @@
   #include "../libs/buzzer.h"
 #endif
 
-#if EITHER(HAS_LCD_MENU, ULTIPANEL_FEEDMULTIPLY)
+#if HAS_LCD_MENU || ENABLED(ULTIPANEL_FEEDMULTIPLY)
   #define HAS_ENCODER_ACTION 1
 #endif
 #if (!HAS_ADC_BUTTONS && ENABLED(NEWPANEL)) || BUTTONS_EXIST(EN1, EN2)
@@ -43,10 +43,6 @@
 // I2C buttons must be read in the main thread
 #if EITHER(LCD_I2C_VIKI, LCD_I2C_PANELOLU2)
   #define HAS_SLOW_BUTTONS 1
-#endif
-
-#if E_MANUAL > 1
-  #define MULTI_MANUAL 1
 #endif
 
 #if HAS_SPI_LCD
@@ -401,8 +397,6 @@ public:
       static void quick_feedback(const bool clear_buttons=true);
       #if HAS_BUZZER
         static void completion_feedback(const bool good=true);
-      #else
-        static inline void completion_feedback(const bool=true) {}
       #endif
 
       #if DISABLED(LIGHTWEIGHT_UI)
@@ -495,9 +489,15 @@ public:
     static void save_previous_screen();
 
     // goto_previous_screen and go_back may also be used as menu item callbacks
-    static void _goto_previous_screen(TERN_(TURBO_BACK_MENU_ITEM, const bool is_back));
-    static inline void goto_previous_screen() { _goto_previous_screen(TERN_(TURBO_BACK_MENU_ITEM, false)); }
-    static inline void go_back()              { _goto_previous_screen(TERN_(TURBO_BACK_MENU_ITEM, true)); }
+    #if ENABLED(TURBO_BACK_MENU_ITEM)
+      static void _goto_previous_screen(const bool is_back);
+      static inline void goto_previous_screen() { _goto_previous_screen(false); }
+      static inline void go_back()              { _goto_previous_screen(true); }
+    #else
+      static void _goto_previous_screen();
+      FORCE_INLINE static void goto_previous_screen() { _goto_previous_screen(); }
+      FORCE_INLINE static void go_back()              { _goto_previous_screen(); }
+    #endif
 
     static void return_to_status();
     static inline bool on_status_screen() { return currentScreen == status_screen; }
@@ -508,7 +508,11 @@ public:
     #endif
 
     FORCE_INLINE static void defer_status_screen(const bool defer=true) {
-      TERN(LCD_TIMEOUT_TO_STATUS, defer_return_to_status = defer, UNUSED(defer));
+      #if LCD_TIMEOUT_TO_STATUS
+        defer_return_to_status = defer;
+      #else
+        UNUSED(defer);
+      #endif
     }
 
     static inline void goto_previous_screen_no_defer() {
@@ -576,7 +580,11 @@ public:
 
     static uint32_t encoderPosition;
 
-    #define ENCODERBASE (TERN(REVERSE_ENCODER_DIRECTION, -1, +1))
+    #if ENABLED(REVERSE_ENCODER_DIRECTION)
+      #define ENCODERBASE -1
+    #else
+      #define ENCODERBASE +1
+    #endif
 
     #if EITHER(REVERSE_MENU_DIRECTION, REVERSE_SELECT_DIRECTION)
       static int8_t encoderDirection;

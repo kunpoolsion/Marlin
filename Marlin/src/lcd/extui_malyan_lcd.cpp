@@ -71,7 +71,7 @@
 #define MAX_CURLY_COMMAND (32 + LONG_FILENAME_LENGTH) * 2
 
 // Track incoming command bytes from the LCD
-uint16_t inbound_count;
+int inbound_count;
 
 // For sending print completion messages
 bool last_printing_status = false;
@@ -361,38 +361,29 @@ void process_lcd_command(const char* command) {
     DEBUG_ECHOLNPAIR("UNKNOWN COMMAND FORMAT ", command);
 }
 
-//
 // Parse LCD commands mixed with G-Code
-//
-void parse_lcd_byte(const byte b) {
+void parse_lcd_byte(byte b) {
+  static bool parsing_lcd_cmd = false;
   static char inbound_buffer[MAX_CURLY_COMMAND];
 
-  static uint8_t parsing = 0;                   // Parsing state
-  static bool prevcr = false;                   // Was the last c a CR?
-
-  const char c = b & 0x7F;
-
-  if (parsing) {
-    const bool is_lcd = parsing == 1;           // 1 for LCD
-    if ( ( is_lcd && c == '}')                  // Closing brace on LCD command
-      || (!is_lcd && c == '\n')                 // LF on a G-code command
-    ) {
-      inbound_buffer[inbound_count] = '\0';     // Reset before processing
-      parsing = 0;                              // Unflag and...
-      inbound_count = 0;                        // Reset buffer index
-      if (parsing == 1)
-        process_lcd_command(inbound_buffer);    // Handle the LCD command
-      else
+  if (!parsing_lcd_cmd) {
+    if (b == '{' || b == '\n' || b == '\r') {   // A line-ending or opening brace
+      parsing_lcd_cmd = b == '{';               // Brace opens an LCD command
+      if (inbound_count) {                      // Looks like a G-code is in the buffer
+        inbound_buffer[inbound_count] = '\0';   // Reset before processing
+        inbound_count = 0;
         queue.enqueue_one_now(inbound_buffer);  // Handle the G-code command
+      }
     }
-    else if (inbound_count < MAX_CURLY_COMMAND - 2)
-      inbound_buffer[inbound_count++] = is_lcd ? c : b; // Buffer while space remains
   }
-  else {
-         if (c == '{')            parsing = 1;  // Brace opens an LCD command
-    else if (prevcr && c == '\n') parsing = 2;  // CRLF indicates G-code
-    prevcr = (c == '\r');                       // Remember if it was a CR
+  else if (b == '}') {                          // Closing brace on an LCD command
+    parsing_lcd_cmd = false;                    // Unflag and...
+    inbound_buffer[inbound_count] = '\0';       // reset before processing
+    inbound_count = 0;
+    process_lcd_command(inbound_buffer);        // Handle the LCD command
   }
+  else if (inbound_count < MAX_CURLY_COMMAND - 2)
+    inbound_buffer[inbound_count++] = b;        // Buffer only if space remains
 }
 
 /**
@@ -442,8 +433,9 @@ namespace ExtUI {
     update_usb_status(false);
 
     // now drain commands...
-    while (LCD_SERIAL.available())
-      parse_lcd_byte((byte)LCD_SERIAL.read());
+    while (LCD_SERIAL.available()) {
+      parse_lcd_byte((byte)LCD_SERIAL.read() & 0x7F);
+    }
 
     #if ENABLED(SDSUPPORT)
       // The way last printing status works is simple:
@@ -491,16 +483,7 @@ namespace ExtUI {
   void onLoadSettings(const char*) {}
   void onConfigurationStoreWritten(bool) {}
   void onConfigurationStoreRead(bool) {}
-  void onMeshUpdate(const int8_t xpos, const int8_t ypos, const float zval) {}
-  void onMeshUpdate(const int8_t xpos, const int8_t ypos, const ExtUI::probe_state_t state) {}
-
-  #if ENABLED(POWER_LOSS_RECOVERY)
-    void onPowerLossResume() {}
-  #endif
-
-  #if HAS_PID_HEATING
-    void onPidTuning(const result_t rst) {}
-  #endif
+  void onPidTuning(const result_t) {}
 }
 
 #endif // MALYAN_LCD
